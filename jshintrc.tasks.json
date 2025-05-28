@@ -75,9 +75,9 @@
                     "description": "Set the tooltip of the statusbar."
                 },
                 "hide": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Controls whether this task should be displayed in the statusbar."
+                    "type": "string",
+                    "default": "",
+                    "description": "Controls whether this task should be displayed in the statusbar. It's possible to use VSCode predefined variables and inputs such as ${input:MyName}."
                 },
                 "filePattern": {
                     "type": "string",

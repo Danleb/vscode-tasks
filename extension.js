@@ -1,5 +1,6 @@
 const vscode = require('vscode');
 const os = require('os');
+const path = require('path');
 
 var statusBarArray = [];
 var selectList = [];
@@ -399,14 +400,98 @@ function syncStatusBar(memoryStatusBarArray) {
     }
 }
 
-function matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, config) {
+async function evaluateInput(inputName, evaluatedInputs) {
+    const value = evaluatedInputs[inputName];
+    if (value != null) {
+        return value;
+    }
+
+    const inputs = vscode.workspace.getConfiguration('tasks').inputs;
+    const input = inputs.find((element) => element.id === inputName);
+    if (input === null) {
+        throw new Error(`Specified input not found: ${inputName}`);
+    }
+    const evaluatedValue = await vscode.commands.executeCommand(input.command, input.args);
+    evaluatedInputs[inputName] = evaluatedValue;
+    return evaluatedValue;
+}
+
+async function evaluateVariable(variable, evaluatedInputs) {
+    const document = vscode.window.activeTextEditor?.document;
+    const fileUri = document?.uri;
+    const filePath = fileUri?.fsPath ?? '';
+    const fileName = path.basename(filePath);
+    const fileExt = path.extname(fileName);
+    const fileBase = path.basename(fileName, fileExt);
+    const fileDir = path.dirname(filePath);
+
+    switch (variable) {
+        case 'workspaceFolder':
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            return workspaceFolder?.uri.fsPath ?? '';
+
+        case 'file':
+            return filePath;
+
+        case 'fileBasename':
+            return fileName;
+
+        case 'fileBasenameNoExtension':
+            return fileBase;
+
+        case 'fileDirname':
+            return fileDir;
+
+        case 'fileExtname':
+            return fileExt;
+
+        case 'userHome':
+            return os.homedir();
+    }
+
+    if (variable.startsWith('input:')) {
+        const inputVar = variable.slice(6);
+        return evaluateInput(inputVar, evaluatedInputs) ?? '';
+    }
+
+    if (variable.startsWith('env:')) {
+        const envVar = variable.slice(4);
+        return process.env[envVar] ?? '';
+    }
+
+    if (variable.startsWith('config:')) {
+        const configKey = variable.slice(7);
+        const value = config.get<string>(configKey);
+        return value ?? '';
+    }
+
+    throw new Error(`Failed to evaluate variable: ${variable}`);
+}
+
+async function evaluateStr(templatedString) {
+    let evaluatedInputs = {};
+    let evaluatedStr = templatedString;
+
+    const regex = /\$\{.*?\}/g;
+    while (match = regex.exec(templatedString)) {
+        const templateEntry = match[0];
+        const varName = templateEntry.substring(2, templateEntry.length - 1);
+        const value = await evaluateVariable(varName, evaluatedInputs);
+        evaluatedStr = evaluatedStr.replaceAll(templateEntry, value);
+    }
+
+    return evaluatedStr;
+}
+
+async function matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, config) {
     if (typeof config != "object" || !Array.isArray(config.tasks)) {
         return;
     }
     for (const taskCfg of config.tasks) {
         const taskInfo = computeTaskInfo(taskCfg, config);
-        const hide = getAttribute(undefined, taskInfo, "hide");
-        if (hide) {
+        const hideAttribute = getAttribute(undefined, taskInfo, "hide");
+        const hide = await evaluateStr(hideAttribute);
+        if (hide === 'true') {
             continue;
         }
         const taskObject = matchTask(tasks, taskInfo);
@@ -444,7 +529,7 @@ function matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, config) {
     }
 }
 
-function matchAllTasks(tasks) {
+async function matchAllTasks(tasks) {
     let runningTasks = {};
     for (const e of vscode.tasks.taskExecutions) {
         runningTasks[e.task._id] = true;
@@ -455,8 +540,8 @@ function matchAllTasks(tasks) {
     if (configuration) {
         const tasksJson = configuration.inspect('tasks');
         if (tasksJson) {
-            matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, tasksJson.globalValue);
-            matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, tasksJson.workspaceValue);
+            await matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, tasksJson.globalValue);
+            await matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, tasksJson.workspaceValue);
         }
     }
     if (vscode.workspace.workspaceFile !== undefined) {
@@ -465,7 +550,7 @@ function matchAllTasks(tasks) {
             if (configuration) {
                 const tasksJson = configuration.inspect('tasks');
                 if (tasksJson) {
-                    matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, tasksJson.workspaceFolderValue);
+                    await matchTasksInScope(memoryStatusBarArray, tasks, runningTasks, tasksJson.workspaceFolderValue);
                 }
             }
         }
@@ -476,16 +561,16 @@ function matchAllTasks(tasks) {
     return memoryStatusBarArray;
 }
 
-function loadTasks() {
+async function loadTasks() {
     if (vscode.workspace.workspaceFolders === undefined) {
         cleanStatusBar();
         closeUpdateStatusBar();
         return;
     }
 
-    vscode.tasks.fetchTasks().then((tasks) => {
+    vscode.tasks.fetchTasks().then(async (tasks) => {
         tasks = tasks.filter(task => task.source === "Workspace");
-        let memoryStatusBarArray = matchAllTasks(tasks);
+        let memoryStatusBarArray = await matchAllTasks(tasks);
         if (memoryStatusBarArray.length > 0) {
             memoryStatusBarArray.push(createSelectStatusBar());
             syncStatusBar(memoryStatusBarArray);
@@ -525,11 +610,11 @@ function loadTasksWait() {
     }
 }
 
-function refreshTask(task) {
+async function refreshTask(task) {
     if (task.source !== "Workspace") {
         return;
     }
-    let memoryStatusBarArray = matchAllTasks([task]);
+    let memoryStatusBarArray = await matchAllTasks([task]);
     if (memoryStatusBarArray.length == 0) {
         return;
     }
@@ -554,7 +639,7 @@ function runTask(task) {
     });
 }
 
-function activate(context) {
+async function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand(RunTaskCommand, (args) => {
             switch (typeof args) {

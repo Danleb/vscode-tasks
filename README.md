@@ -4,11 +4,24 @@ This extension loads VSCode tasks into status bar.
 ## Options
 You can hide some tasks with the following options directly in `tasks.json`:
 
+Value of the `hide` attribute can be hardcoded:
+
 ```json
 "label": "Test",
 "options": {
   "statusbar": {
-    "hide" : true
+    "hide" : "true"
+  }
+}
+```
+
+Also, value of the `hide` attribute can be evaluated automatically using predefined variables and input variables. The evaluation is done during loading/reloading of tasks status bar. If the final value of `hide` attribute is `true`, then the task is hidden from status bar; otherwise, the task is shown. This approach can be efficiently combined with methods of dynamic evaluation of input variables, such as [Tasks Shell Input](https://marketplace.visualstudio.com/items?itemName=augustocdias.tasks-shell-input) to test necessary conditions, check environment variables, run scripts etc.
+
+```json
+"label": "Test",
+"options": {
+  "statusbar": {
+    "hide": "${input:isTaskShouldBeHidden}"
   }
 }
 ```

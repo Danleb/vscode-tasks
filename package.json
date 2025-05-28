@@ -46,8 +46,8 @@
         "configuration": {
             "properties": {
                 "tasks.statusbar.default.hide": {
-                    "type": "boolean",
-                    "default": false
+                    "type": "string",
+                    "default": ""
                 },
                 "tasks.statusbar.default.color": {
                     "type": "string",
